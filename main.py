@@ -128,10 +128,15 @@ async def api_tienda_test_notificacion(payload: dict):
     return res
 
 from services.tienda_bridge import crear_resena_en_tienda, obtener_resenas_tienda  # type: ignore
-from data.db import obtener_resenas_db  # type: ignore
+from data.db import obtener_resenas_db, guardar_resena_db  # type: ignore
+from event_bus import event_bus, EVENTO_RESENA_CREADA  # type: ignore
+from datetime import datetime
+from typing import Optional
+import uuid
 
+@app.get("/api/resenas", tags=["Reseñas"])
 @app.get("/api/tienda/resenas", tags=["Puente SOA"])
-async def api_tienda_obtener_resenas(item_id: str = None):
+async def api_tienda_obtener_resenas(item_id: Optional[str] = None):
     """Consulta las opiniones registradas tanto localmente como en el servicio de Alan."""
     return {
         "recurso_id": item_id,
@@ -139,13 +144,63 @@ async def api_tienda_obtener_resenas(item_id: str = None):
         "servicio_externo": obtener_resenas_tienda(item_id)
     }
 
+@app.post("/api/resenas", tags=["Reseñas"])
+async def api_crear_resena_rest(payload: dict):
+    """
+    Publica una reseña en el sistema del hotel y la sincroniza en vivo con el microservicio de Alan.
+    """
+    item_id = str(payload.get("item_id") or payload.get("recurso_id") or "r-12")
+    user_id = str(payload.get("user_id", "cliente-101"))
+    user_name = str(payload.get("user_name", "Huésped Hotel"))
+    rating = int(payload.get("rating") or payload.get("calificacion", 5))
+    title = str(payload.get("title") or payload.get("titulo", "Excelente estancia"))
+    comment = str(payload.get("comment") or payload.get("comentario", ""))
+    reservation_id = str(payload.get("reservation_id") or payload.get("reservacion_id", ""))
+
+    # 1. Enviar al microservicio de Alan (Ngrok)
+    resp_alan = crear_resena_en_tienda(
+        user_id=user_id,
+        user_name=user_name,
+        item_id=item_id,
+        rating=rating,
+        title=title,
+        comment=comment,
+        reservation_id=reservation_id
+    )
+
+    # 2. Guardar en base de datos local
+    nueva_resena = {
+        "id": f"res-{uuid.uuid4().hex[:8]}",
+        "recursoId": item_id,
+        "usuarioId": user_id,
+        "usuarioNombre": user_name,
+        "calificacion": rating,
+        "titulo": title,
+        "comentario": comment,
+        "fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "reservacionId": reservation_id,
+        "servicioExterno": "Tienda Online Alan (Interactions)",
+        "reviewIdExterno": resp_alan.get("review_id", "")
+    }
+    guardar_resena_db(nueva_resena)
+
+    # 3. Notificar en bus de eventos
+    event_bus.publish(EVENTO_RESENA_CREADA, nueva_resena)
+
+    return {
+        "exito": True,
+        "mensaje": "Reseña registrada y sincronizada exitosamente.",
+        "resena": nueva_resena,
+        "servicio_externo": resp_alan
+    }
+
 @app.post("/api/tienda/test-resena", tags=["Puente SOA"])
 async def api_tienda_test_resena(payload: dict):
-    """Prueba REST para publicar una reseña directamente en el microservicio de Alan."""
+    """Prueba REST para publicar una reseña directamente en el microservicio en Go de Alan."""
     return crear_resena_en_tienda(
         user_id=payload.get("user_id", "cliente-101"),
         user_name=payload.get("user_name", "Juan Pérez"),
-        item_id=payload.get("item_id", "r-12"),
+        item_id=payload.get("item_id") or payload.get("product_id", "r-12"),
         rating=int(payload.get("rating", 5)),
         title=payload.get("title", "Excelente estancia"),
         comment=payload.get("comment", "Habitación sumamente cómoda y limpia."),

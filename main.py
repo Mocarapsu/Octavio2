@@ -156,6 +156,7 @@ async def api_crear_resena_rest(payload: dict):
     title = str(payload.get("title") or payload.get("titulo", "Excelente estancia"))
     comment = str(payload.get("comment") or payload.get("comentario", ""))
     reservation_id = str(payload.get("reservation_id") or payload.get("reservacion_id", ""))
+    images = payload.get("images") or payload.get("imagenes") or []
 
     # 1. Enviar al microservicio de Alan (Ngrok)
     resp_alan = crear_resena_en_tienda(
@@ -165,7 +166,8 @@ async def api_crear_resena_rest(payload: dict):
         rating=rating,
         title=title,
         comment=comment,
-        reservation_id=reservation_id
+        reservation_id=reservation_id,
+        images=images
     )
 
     # 2. Guardar en base de datos local
@@ -177,6 +179,7 @@ async def api_crear_resena_rest(payload: dict):
         "calificacion": rating,
         "titulo": title,
         "comentario": comment,
+        "imagenes": images,
         "fecha": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "reservacionId": reservation_id,
         "servicioExterno": "Tienda Online Alan (Interactions)",
@@ -204,7 +207,8 @@ async def api_tienda_test_resena(payload: dict):
         rating=int(payload.get("rating", 5)),
         title=payload.get("title", "Excelente estancia"),
         comment=payload.get("comment", "Habitación sumamente cómoda y limpia."),
-        reservation_id=payload.get("reservation_id", "")
+        reservation_id=payload.get("reservation_id", ""),
+        images=payload.get("images") or payload.get("imagenes") or []
     )
 
 # Directorio de archivos estáticos para la interfaz web moderna
@@ -221,4 +225,4 @@ if __name__ == "__main__":
     print("  -> Interfaz Web Interactiva: http://localhost:8000")
     print("  -> GraphQL Playground:       http://localhost:8000/graphql")
     print("="*70 + "\n")
-    uvicorn.run("main:app", host="127.0.0.1", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

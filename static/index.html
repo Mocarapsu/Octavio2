@@ -921,6 +921,34 @@
               <textarea id="reviewComment" class="form-control" rows="3" placeholder="Cuéntanos sobre el servicio, la comodidad de la cama, la limpieza, etc..." required></textarea>
             </div>
 
+            <!-- Soporte para Fotos / Galería de Imágenes -->
+            <div class="form-group" style="margin-bottom: 14px; background: #ffffff; border: 1px dashed #cbd5e1; border-radius: 8px; padding: 12px;">
+              <label style="font-weight: 600; font-size: 0.82rem; color: #1e293b; display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+                <span>📷 Fotos de tu estancia (Opcional):</span>
+                <span style="font-size: 0.72rem; color: #64748b; font-weight: normal;">Comprimido a 800px para red rápida</span>
+              </label>
+
+              <!-- Botón para subir archivos desde la PC -->
+              <div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 8px;">
+                <input type="file" id="reviewImagesInput" accept="image/*" multiple style="display: none;" onchange="app.handleReviewImagesUpload(event)">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="document.getElementById('reviewImagesInput').click()" style="display: inline-flex; align-items: center; gap: 5px; font-size: 0.8rem;">
+                  📁 Subir fotos desde mi PC
+                </button>
+                <span style="font-size: 0.75rem; color: #64748b;">o ingresa una URL:</span>
+              </div>
+
+              <!-- Input para pegar URL de imagen -->
+              <div style="display: flex; gap: 6px;">
+                <input type="url" id="reviewImageUrlInput" class="form-control" style="font-size: 0.82rem; padding: 4px 8px;" placeholder="https://ejemplo.com/foto.jpg">
+                <button type="button" class="btn btn-secondary btn-sm" onclick="app.addReviewImageUrl()" style="white-space: nowrap; font-size: 0.8rem;">
+                  + Añadir URL
+                </button>
+              </div>
+
+              <!-- Vista previa de fotos seleccionadas -->
+              <div id="reviewImagesPreview" style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px;"></div>
+            </div>
+
             <div style="display: flex; justify-content: flex-end; gap: 8px;">
               <button type="submit" class="btn btn-primary btn-sm" id="btnPublicarResena">
                 ⭐ Publicar Reseña en la Tienda Online
@@ -1372,6 +1400,19 @@
 
       <div class="modal-actions" style="border-top: 1px solid #e2e8f0; padding: 12px 20px;">
         <button class="btn btn-secondary" onclick="app.closeModal('hotelDetailModal')">Cerrar</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL: VISOR DE FOTO COMPLETA (LIGHTBOX RESEÑAS) -->
+  <div class="modal-backdrop" id="imageViewerModal" onclick="app.closeModalOutside(event, 'imageViewerModal')">
+    <div class="modal-card" style="max-width: 820px; text-align: center; background: #0f172a; border: 1px solid #334155; padding: 0; overflow: hidden;">
+      <div class="modal-header" style="border-bottom: 1px solid #334155; padding: 12px 18px; display: flex; justify-content: space-between; align-items: center;">
+        <h3 style="color: #f8fafc; font-size: 1rem; margin: 0; font-weight: 600;">🖼️ Foto de Huésped de la Habitación</h3>
+        <button class="modal-close-btn" style="color: #94a3b8; background: transparent; border: none; font-size: 1.2rem; cursor: pointer;" onclick="app.closeModal('imageViewerModal')">✕</button>
+      </div>
+      <div class="modal-body" style="padding: 18px; display: flex; justify-content: center; align-items: center; min-height: 250px; background: #020617;">
+        <img id="fullImageViewerImg" src="" alt="Foto en alta resolución" style="max-width: 100%; max-height: 70vh; border-radius: 6px; box-shadow: 0 10px 25px rgba(0,0,0,0.5); object-fit: contain;">
       </div>
     </div>
   </div>

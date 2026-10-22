@@ -2588,6 +2588,8 @@ const app = {
   // ==============================================================================
   // 7. MICROSERVICIO DE RESEÑAS Y VALORACIONES (TIENDA ONLINE ALAN LÓPEZ)
   // ==============================================================================
+  pendingReviewImages: [],
+
   async openReviewsModal(recursoId, recursoNombre = "") {
     const rIdInput = document.getElementById("reviewRecursoId");
     if (rIdInput) rIdInput.value = recursoId;
@@ -2597,9 +2599,110 @@ const app = {
       modalTitle.textContent = recursoNombre ? `Opiniones: ${recursoNombre}` : "Opiniones de Huéspedes";
     }
 
+    this.pendingReviewImages = [];
+    this.renderReviewImagesPreview();
+    const fileInp = document.getElementById("reviewImagesInput");
+    if (fileInp) fileInp.value = "";
+    const urlInp = document.getElementById("reviewImageUrlInput");
+    if (urlInp) urlInp.value = "";
+
     this.setReviewRating(5);
     this.openModal("reviewsModal");
     await this.cargarResenasRecurso(recursoId);
+  },
+
+  async resizeImage(file, maxDim = 800, quality = 0.75) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          let w = img.width;
+          let h = img.height;
+          if (w > maxDim || h > maxDim) {
+            if (w > h) {
+              h = Math.round((h * maxDim) / w);
+              w = maxDim;
+            } else {
+              w = Math.round((w * maxDim) / h);
+              h = maxDim;
+            }
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = w;
+          canvas.height = h;
+          const ctx = canvas.getContext("2d");
+          ctx.drawImage(img, 0, 0, w, h);
+          resolve(canvas.toDataURL("image/jpeg", quality));
+        };
+        img.onerror = () => resolve(e.target.result);
+        img.src = e.target.result;
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  },
+
+  async handleReviewImagesUpload(event) {
+    const files = event.target.files;
+    if (!files || files.length === 0) return;
+    if (!this.pendingReviewImages) this.pendingReviewImages = [];
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      if (!file.type.startsWith("image/")) continue;
+      try {
+        const base64 = await this.resizeImage(file, 800, 0.75);
+        this.pendingReviewImages.push(base64);
+      } catch (err) {
+        console.error("Error optimizando imagen:", err);
+      }
+    }
+    event.target.value = "";
+    this.renderReviewImagesPreview();
+  },
+
+  addReviewImageUrl() {
+    const input = document.getElementById("reviewImageUrlInput");
+    if (!input) return;
+    const url = input.value.trim();
+    if (!url) {
+      this.showToast("Ingresa una URL válida de imagen.", "warning");
+      return;
+    }
+    if (!this.pendingReviewImages) this.pendingReviewImages = [];
+    this.pendingReviewImages.push(url);
+    input.value = "";
+    this.renderReviewImagesPreview();
+  },
+
+  removeReviewImage(index) {
+    if (this.pendingReviewImages && this.pendingReviewImages.length > index) {
+      this.pendingReviewImages.splice(index, 1);
+      this.renderReviewImagesPreview();
+    }
+  },
+
+  renderReviewImagesPreview() {
+    const container = document.getElementById("reviewImagesPreview");
+    if (!container) return;
+    if (!this.pendingReviewImages || this.pendingReviewImages.length === 0) {
+      container.innerHTML = "";
+      return;
+    }
+
+    container.innerHTML = this.pendingReviewImages.map((src, idx) => `
+      <div style="position: relative; display: inline-block; width: 68px; height: 68px; border-radius: 6px; overflow: hidden; border: 1px solid #cbd5e1; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+        <img src="${src}" style="width: 100%; height: 100%; object-fit: cover;" alt="Foto previa">
+        <button type="button" onclick="app.removeReviewImage(${idx})" style="position: absolute; top: 2px; right: 2px; background: rgba(239, 68, 68, 0.9); color: white; border: none; border-radius: 50%; width: 18px; height: 18px; display: flex; align-items: center; justify-content: center; font-size: 11px; cursor: pointer; padding: 0; line-height: 1;" title="Quitar foto">✕</button>
+      </div>
+    `).join("");
+  },
+
+  viewFullImage(src) {
+    const img = document.getElementById("fullImageViewerImg");
+    if (img) img.src = src;
+    this.openModal("imageViewerModal");
   },
 
   setReviewRating(calif) {
@@ -2650,6 +2753,7 @@ const app = {
             usuarioNombre
             servicioExterno
             reviewIdExterno
+            imagenes
           }
         }
       }
@@ -2684,8 +2788,16 @@ const app = {
           const starsText = "★".repeat(r.calificacion) + "☆".repeat(5 - r.calificacion);
           const fechaStr = r.fecha ? new Date(r.fecha).toLocaleDateString("es-MX", { year: "numeric", month: "short", day: "numeric" }) : "";
           
+          const fotosGallery = (r.imagenes && r.imagenes.length > 0) ? `
+            <div class="review-gallery" style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; margin-bottom: 8px;">
+              ${r.imagenes.map(imgSrc => `
+                <img src="${imgSrc}" alt="Foto de huésped" style="width: 76px; height: 76px; object-fit: cover; border-radius: 6px; border: 1px solid #cbd5e1; cursor: pointer; transition: transform 0.2s, box-shadow 0.2s;" onmouseover="this.style.transform='scale(1.06)'; this.style.boxShadow='0 4px 10px rgba(0,0,0,0.18)';" onmouseout="this.style.transform='scale(1)'; this.style.boxShadow='none';" onclick="app.viewFullImage('${imgSrc}')" title="Haz clic para ver la foto en tamaño completo">
+              `).join("")}
+            </div>
+          ` : "";
+
           return `
-            <div class="review-card-item" style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; margin-bottom: 10px;">
+            <div class="review-card-item" style="background: #ffffff; border: 1px solid #e2e8f0; border-radius: 8px; padding: 14px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.03);">
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
                 <div>
                   <strong style="color: #0f172a; font-size: 0.92rem;">${r.usuarioNombre}</strong>
@@ -2694,8 +2806,9 @@ const app = {
                 <small style="color: #64748b;">${fechaStr}</small>
               </div>
               <h5 style="margin: 4px 0 6px 0; font-size: 0.95rem; color: #1e293b;">${r.titulo}</h5>
-              <p style="margin: 0 0 8px 0; font-size: 0.85rem; color: #475569; line-height: 1.4;">${r.comentario}</p>
-              <div style="display: flex; justify-content: flex-start;">
+              <p style="margin: 0 0 6px 0; font-size: 0.85rem; color: #475569; line-height: 1.4;">${r.comentario}</p>
+              ${fotosGallery}
+              <div style="display: flex; justify-content: flex-start; margin-top: 4px;">
                 <span class="badge-status badge-confirmada" style="font-size: 0.7rem; padding: 2px 6px;">
                   ✓ Verificado vía ${r.servicioExterno || "Tienda Online Alan"}
                 </span>
@@ -2740,16 +2853,20 @@ const app = {
           fecha
           usuarioNombre
           servicioExterno
+          imagenes
         }
       }
     `;
+
+    const fotosAEnviar = (this.pendingReviewImages && this.pendingReviewImages.length > 0) ? this.pendingReviewImages : null;
 
     const res = await this.graphql(mutation, {
       input: {
         recursoId: recursoId,
         calificacion: rating,
         titulo: titulo,
-        comentario: comentario
+        comentario: comentario,
+        imagenes: fotosAEnviar
       }
     });
 
@@ -2759,6 +2876,13 @@ const app = {
       this.showToast("¡Reseña publicada con éxito en la Tienda Online!", "success");
       document.getElementById("reviewTitle").value = "";
       document.getElementById("reviewComment").value = "";
+      this.pendingReviewImages = [];
+      this.renderReviewImagesPreview();
+      const fileInp = document.getElementById("reviewImagesInput");
+      if (fileInp) fileInp.value = "";
+      const urlInp = document.getElementById("reviewImageUrlInput");
+      if (urlInp) urlInp.value = "";
+
       await this.cargarResenasRecurso(recursoId);
       await this.cargarContabilizacion();
     } else {

@@ -36,7 +36,7 @@ import uuid
 import time
 import random
 from datetime import datetime
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, List
 import requests
 import urllib3
 
@@ -54,27 +54,38 @@ DEFAULT_CONFIG = {
 }
 
 
+def limpiar_url_base(url: str) -> str:
+    """Extrae la URL base (protocolo + host + puerto) eliminando rutas como /api/..."""
+    u = (url or "").strip().rstrip("/")
+    if "/api" in u:
+        u = u.split("/api")[0].rstrip("/")
+    return u
+
+
 def cargar_config_tienda() -> dict:
     """Carga la configuración del servicio externo de Alan."""
+    cfg = DEFAULT_CONFIG.copy()
     if os.path.exists(CONFIG_PATH):
         try:
             with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-                cfg = json.load(f)
-                return {**DEFAULT_CONFIG, **cfg}
+                datos = json.load(f)
+                cfg.update(datos)
         except Exception as e:
             print(f"[PUENTE TIENDA] Error al leer configuración: {e}")
-    return DEFAULT_CONFIG.copy()
+    if "ngrok_url" in cfg:
+        cfg["ngrok_url"] = limpiar_url_base(cfg["ngrok_url"])
+    return cfg
 
 
 def guardar_config_tienda(nueva_url: str) -> dict:
-    """Actualiza la URL de Ngrok cuando el compañero reinicie su túnel."""
+    """Actualiza la URL del servicio de Alan cuando cambie su IP o túnel."""
     cfg = cargar_config_tienda()
-    cfg["ngrok_url"] = nueva_url.strip().rstrip("/")
+    cfg["ngrok_url"] = limpiar_url_base(nueva_url)
     try:
         os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
         with open(CONFIG_PATH, "w", encoding="utf-8") as f:
             json.dump(cfg, f, indent=4, ensure_ascii=False)
-        print(f"[PUENTE TIENDA] URL de Ngrok actualizada a: {cfg['ngrok_url']}")
+        print(f"[PUENTE TIENDA] URL de la Tienda actualizada a: {cfg['ngrok_url']}")
     except Exception as e:
         print(f"[PUENTE TIENDA] Error al guardar configuración: {e}")
     return cfg
@@ -412,7 +423,8 @@ def crear_resena_en_tienda(
     rating: int,
     title: str,
     comment: str,
-    reservation_id: Optional[str] = None
+    reservation_id: Optional[str] = None,
+    images: Optional[List[str]] = None
 ) -> Dict[str, Any]:
     """
     Consume el microservicio REST de reseñas de la Tienda Online (Go + PostgreSQL):
@@ -424,32 +436,47 @@ def crear_resena_en_tienda(
       "user_id": str(user_id),
       "rating": int(rating),
       "title": str(title or "Reseña de Huésped"),
-      "comment": f"{user_name} (Reserva {reservation_id}): {comment}"
+      "comment": f"{user_name} (Reserva {reservation_id}): {comment} |||IMAGES|||[...]"
     }
 
-    Alan devuelve review_id e is_verified_buyer.
+    Alan devuelve review_id e is_verified_buyer. Las fotos viajan serializadas
+    dentro de comment sin romper el esquema de Alan en PostgreSQL.
     """
     cfg = cargar_config_tienda()
     base_url = cfg["ngrok_url"]
     headers = obtener_headers_ngrok()
 
     calif = max(1, min(5, int(rating)))
-    res_folio = str(reservation_id) if reservation_id else "General"
-    comentario_formateado = f"{user_name} (Reserva {res_folio}): {comment}"
+    res_folio = str(reservation_id) if reservation_id else ""
     titulo_formateado = str(title or "Reseña de Huésped").strip()
 
+    # Comentario formateado con soporte de imágenes |||IMAGES|||
+    encabezado = f"{user_name} (Reserva {res_folio})" if res_folio else user_name
+    comentario_formateado = f"{encabezado}: {comment}"
+
+    lista_imagenes = images if (images and isinstance(images, list)) else []
+    if lista_imagenes:
+        clean_imgs = [str(img).strip() for img in lista_imagenes if str(img).strip()]
+        if clean_imgs and "|||IMAGES|||" not in comentario_formateado:
+            comentario_formateado = f"{comentario_formateado} |||IMAGES|||{','.join(clean_imgs)}"
+
+    # Payload con claves compatibles tanto para Alan (Go) como estándares SOA
     payload = {
-        "product_id": str(item_id),
         "user_id": str(user_id),
+        "user_name": str(user_name),
+        "product_id": str(item_id),
+        "item_id": str(item_id),
+        "resource_id": str(item_id),
         "rating": calif,
         "title": titulo_formateado,
-        "comment": comentario_formateado
+        "comment": comentario_formateado,
+        "reservation_id": res_folio
     }
 
     endpoint = f"{base_url}/api/interactions/reviews"
 
     print(f"\n[PUENTE TIENDA -> RESEÑAS] Enviando reseña REST a Go/PostgreSQL: {endpoint}")
-    print(f"  -> Body JSON: {json.dumps(payload, ensure_ascii=False)}")
+    print(f"  -> Body JSON: {json.dumps(payload, ensure_ascii=False)[:300]}... (Fotos: {len(lista_imagenes)})")
 
     try:
         resp = requests.post(
@@ -480,6 +507,9 @@ def crear_resena_en_tienda(
                 "rating": calif,
                 "title": titulo_formateado,
                 "comment": comentario_formateado,
+                "comentario_limpio": comment,
+                "images": lista_imagenes,
+                "imagenes": lista_imagenes,
                 "created_at": data.get("created_at", datetime.now().isoformat()),
                 "status": "APPROVED",
                 "origen_servicio": "REMOTO_ALAN_NGROK"
@@ -502,6 +532,9 @@ def crear_resena_en_tienda(
             "rating": calif,
             "title": titulo_formateado,
             "comment": comentario_formateado,
+            "comentario_limpio": comment,
+            "images": lista_imagenes,
+            "imagenes": lista_imagenes,
             "created_at": datetime.now().isoformat(),
             "status": "APPROVED",
             "origen_servicio": "ADAPTADOR_SOA_FALLBACK"
@@ -564,19 +597,36 @@ def obtener_resenas_tienda(item_id: Optional[str] = None) -> Dict[str, Any]:
                 rev_id = str(r.get("review_id") or r.get("id") or "")
                 calif = int(r.get("rating") or r.get("calificacion") or 5)
                 titulo = str(r.get("title") or r.get("titulo") or "Opinión")
-                comentario = str(r.get("comment") or r.get("comentario") or "")
+                raw_comment = str(r.get("comment") or r.get("comentario") or "")
                 user_id = str(r.get("user_id") or r.get("usuario_id") or "")
                 fecha = str(r.get("created_at") or r.get("fecha") or datetime.now().isoformat())
                 verified = bool(r.get("is_verified_buyer", False))
 
+                # Extraer imágenes si vienen concatenadas con el separador |||IMAGES|||
+                fotos = []
+                comentario_sin_fotos = raw_comment
+                if "|||IMAGES|||" in raw_comment:
+                    partes_img = raw_comment.split("|||IMAGES|||", 1)
+                    comentario_sin_fotos = partes_img[0].strip()
+                    datos_img = partes_img[1].strip()
+                    if datos_img.startswith("["):
+                        try:
+                            parsed = json.loads(datos_img)
+                            if isinstance(parsed, list):
+                                fotos = parsed
+                        except Exception:
+                            pass
+                    else:
+                        fotos = [u.strip() for u in datos_img.split(",") if u.strip()]
+
                 # Extraer nombre si el comentario viene con prefijo 'Nombre (Reserva ...): comentario'
                 nombre_usuario = "Huésped"
-                comentario_limpio = comentario
-                if " (Reserva " in comentario and "): " in comentario:
+                comentario_limpio = comentario_sin_fotos
+                if " (Reserva " in comentario_sin_fotos and "): " in comentario_sin_fotos:
                     try:
-                        partes = comentario.split("): ", 1)
+                        partes = comentario_sin_fotos.split("): ", 1)
                         cabecera = partes[0]
-                        comentario_limpio = partes[1] if len(partes) > 1 else comentario
+                        comentario_limpio = partes[1] if len(partes) > 1 else comentario_sin_fotos
                         nombre_usuario = cabecera.split(" (Reserva ")[0]
                     except Exception:
                         pass
@@ -592,9 +642,9 @@ def obtener_resenas_tienda(item_id: Optional[str] = None) -> Dict[str, Any]:
                     "calificacion": calif,
                     "title": titulo,
                     "titulo": titulo,
-                    "comment": comentario,
+                    "comment": comentario_sin_fotos,
                     "comentario": comentario_limpio,
-                    "comentario_original": comentario,
+                    "comentario_original": raw_comment,
                     "user_id": user_id,
                     "usuario_id": user_id,
                     "user_name": nombre_usuario,
@@ -602,6 +652,8 @@ def obtener_resenas_tienda(item_id: Optional[str] = None) -> Dict[str, Any]:
                     "created_at": fecha,
                     "fecha": fecha,
                     "is_verified_buyer": verified,
+                    "images": fotos,
+                    "imagenes": fotos,
                     "servicioExterno": "Tienda Online Alan (Go / PostgreSQL)",
                     "origen": "REMOTO_ALAN_NGROK"
                 })
@@ -632,6 +684,25 @@ def obtener_resenas_tienda(item_id: Optional[str] = None) -> Dict[str, Any]:
         for r in resenas_locales:
             c = int(r.get("calificacion", 5))
             suma_calif += c
+            raw_comment = str(r.get("comentario") or r.get("comment") or "")
+            fotos = r.get("imagenes") or r.get("images") or []
+            comentario_limpio = raw_comment
+
+            if "|||IMAGES|||" in raw_comment:
+                partes_img = raw_comment.split("|||IMAGES|||", 1)
+                comentario_limpio = partes_img[0].strip()
+                if not fotos:
+                    datos_img = partes_img[1].strip()
+                    if datos_img.startswith("["):
+                        try:
+                            parsed = json.loads(datos_img)
+                            if isinstance(parsed, list):
+                                fotos = parsed
+                        except Exception:
+                            pass
+                    else:
+                        fotos = [u.strip() for u in datos_img.split(",") if u.strip()]
+
             adaptadas.append({
                 "id": str(r.get("id")),
                 "review_id": str(r.get("reviewIdExterno") or r.get("id")),
@@ -639,8 +710,8 @@ def obtener_resenas_tienda(item_id: Optional[str] = None) -> Dict[str, Any]:
                 "calificacion": c,
                 "title": r.get("titulo", ""),
                 "titulo": r.get("titulo", ""),
-                "comment": r.get("comentario", ""),
-                "comentario": r.get("comentario", ""),
+                "comment": comentario_limpio,
+                "comentario": comentario_limpio,
                 "user_id": r.get("usuarioId", ""),
                 "usuario_id": r.get("usuarioId", ""),
                 "user_name": r.get("usuarioNombre", "Huésped"),
@@ -648,6 +719,8 @@ def obtener_resenas_tienda(item_id: Optional[str] = None) -> Dict[str, Any]:
                 "created_at": r.get("fecha", datetime.now().isoformat()),
                 "fecha": r.get("fecha", datetime.now().isoformat()),
                 "is_verified_buyer": True,
+                "images": fotos,
+                "imagenes": fotos,
                 "servicioExterno": "Tienda Online Alan (Go / PostgreSQL)",
                 "origen": "ADAPTADOR_SOA_FALLBACK"
             })

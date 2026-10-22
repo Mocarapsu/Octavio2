@@ -111,6 +111,14 @@ class EventBus:
             except Exception as e:
                 print(f"[BUS DE MENSAJES ERROR] Falló suscriptor de '{evento}': {e}")
 
+    def publish(self, evento: str, datos: Dict[str, Any]):
+        """Alias en inglés para publicar."""
+        return self.publicar(evento, datos)
+
+    def subscribe(self, evento: str, handler: Callable[[Dict[str, Any]], None]):
+        """Alias en inglés para suscribir."""
+        return self.suscribir(evento, handler)
+
 
 # Instancia singleton del Bus de Mensajes accesible para todos los servicios
 event_bus = EventBus()

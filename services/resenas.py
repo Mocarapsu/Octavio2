@@ -30,6 +30,7 @@ INTEGRACIÓN ARQUITECTÓNICA (PATRÓN ADAPTER / API GATEWAY):
 import sys
 import os
 import uuid
+import json
 from datetime import datetime
 from typing import Optional, List
 
@@ -82,6 +83,7 @@ class Resena:
     reservacion_id: Optional[str] = None
     servicio_externo: Optional[str] = "Tienda Online Alan (Interactions)"
     review_id_externo: Optional[str] = None
+    imagenes: List[str] = strawberry.field(default_factory=list)
 
 
 @strawberry.type
@@ -105,21 +107,35 @@ class CrearResenaInput:
     titulo: str
     comentario: str
     reservacion_id: Optional[str] = None
+    imagenes: Optional[List[str]] = None
 
 
 def formatear_resena(r: dict) -> Resena:
+    comentario = r.get("comentario", "") or r.get("comment", "")
+    fotos = r.get("imagenes") or r.get("images") or []
+    if not fotos and " |||IMAGES|||" in str(comentario):
+        partes = str(comentario).split(" |||IMAGES|||", 1)
+        comentario = partes[0].strip()
+        try:
+            parsed = json.loads(partes[1])
+            if isinstance(parsed, list):
+                fotos = parsed
+        except Exception:
+            pass
+
     return Resena(
-        id=strawberry.ID(r["id"]),
-        recurso_id=strawberry.ID(r["recursoId"]),
-        usuario_id=strawberry.ID(r["usuarioId"]),
-        usuario_nombre=r.get("usuarioNombre", "Huésped"),
-        calificacion=int(r.get("calificacion", 5)),
-        titulo=r.get("titulo", "Excelente estancia"),
-        comentario=r.get("comentario", ""),
-        fecha=r.get("fecha", ""),
-        reservacion_id=r.get("reservacionId"),
-        servicio_externo=r.get("servicioExterno", "Tienda Online Alan (Interactions)"),
-        review_id_externo=r.get("reviewIdExterno")
+        id=strawberry.ID(str(r.get("id") or r.get("review_id") or "")),
+        recurso_id=strawberry.ID(str(r.get("recursoId") or r.get("item_id") or r.get("product_id") or "")),
+        usuario_id=strawberry.ID(str(r.get("usuarioId") or r.get("user_id") or "")),
+        usuario_nombre=r.get("usuarioNombre") or r.get("user_name") or "Huésped",
+        calificacion=int(r.get("calificacion") or r.get("rating") or 5),
+        titulo=r.get("titulo") or r.get("title") or "Excelente estancia",
+        comentario=comentario,
+        fecha=r.get("fecha") or r.get("created_at") or "",
+        reservacion_id=r.get("reservacionId") or r.get("reservation_id"),
+        servicio_externo=r.get("servicioExterno") or "Tienda Online Alan (Interactions)",
+        review_id_externo=r.get("reviewIdExterno") or r.get("review_id"),
+        imagenes=fotos
     )
 
 
@@ -155,6 +171,29 @@ class ResenasQueries:
         Calcula el promedio de estrellas y agrupa las opiniones de un recurso.
         """
         rec_id_str = str(recurso_id)
+        # Sincronizar opiniones remotas de Alan si existen
+        try:
+            data_tienda = obtener_resenas_tienda(rec_id_str)
+            for r_ext in data_tienda.get("reviews", []):
+                ext_id = str(r_ext.get("review_id") or r_ext.get("id") or "")
+                if ext_id and not any(r.get("reviewIdExterno") == ext_id or r.get("id") == ext_id for r in RESENAS_DB.values()):
+                    RESENAS_DB[f"ext-{ext_id}"] = {
+                        "id": f"ext-{ext_id}",
+                        "recursoId": rec_id_str,
+                        "usuarioId": r_ext.get("user_id", "cliente-ext"),
+                        "usuarioNombre": r_ext.get("user_name", "Huésped"),
+                        "reservacionId": "",
+                        "calificacion": int(r_ext.get("rating", 5)),
+                        "titulo": r_ext.get("title", "Opinión"),
+                        "comentario": r_ext.get("comentario", ""),
+                        "imagenes": r_ext.get("imagenes", []),
+                        "fecha": r_ext.get("created_at", datetime.now().isoformat()),
+                        "servicioExterno": "Tienda Online Alan (Remoto)",
+                        "reviewIdExterno": ext_id
+                    }
+        except Exception:
+            pass
+
         lista = [r for r in RESENAS_DB.values() if r.get("recursoId") == rec_id_str]
 
         if not lista:
@@ -193,7 +232,7 @@ class ResenasMutations:
         Publica una nueva reseña:
         1. Autenticación Triple A (Exige JWT de huésped o admin).
         2. Validación de reglas de negocio (Calificación del 1 al 5).
-        3. Invoca el microservicio REST de Alan mediante el puente SOA.
+        3. Invoca el microservicio REST de Alan mediante el puente SOA con fotos opcionales.
         4. Persiste en MySQL y memoria.
         5. Registra auditoría (Accounting AAA) y emite evento al Bus.
         """
@@ -212,6 +251,8 @@ class ResenasMutations:
         nombre_recurso = recurso.get("nombre", rec_id) if recurso else rec_id
 
         # 4. Invocación del microservicio REST de Tienda Online (Alan López)
+        fotos = input.imagenes if (input.imagenes and isinstance(input.imagenes, list)) else []
+
         res_externa = crear_resena_en_tienda(
             user_id=user_id,
             user_name=user_nombre,
@@ -219,7 +260,8 @@ class ResenasMutations:
             rating=calif,
             title=input.titulo.strip(),
             comment=input.comentario.strip(),
-            reservation_id=str(input.reservacion_id) if input.reservacion_id else None
+            reservation_id=str(input.reservacion_id) if input.reservacion_id else None,
+            images=fotos
         )
 
         review_id_externo = res_externa.get("review_id", f"rev-{uuid.uuid4().hex[:6]}")
@@ -238,6 +280,7 @@ class ResenasMutations:
             "calificacion": calif,
             "titulo": input.titulo.strip(),
             "comentario": input.comentario.strip(),
+            "imagenes": fotos,
             "fecha": fecha_resena,
             "servicioExterno": f"Tienda Online Alan ({origen_servicio})",
             "reviewIdExterno": review_id_externo

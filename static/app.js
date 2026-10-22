@@ -1273,7 +1273,7 @@ const app = {
       await this.cargarNotificacionesCount();
       // Registra el movimiento en la auditoria contable de MySQL
       await this.cargarContabilizacion();
-    // Si hubo un error (fondos insuficientes o sesion vencida)
+      // Si hubo un error (fondos insuficientes o sesion vencida)
     } else {
       const errorMsg = res.errors?.[0]?.message || "Error al procesar el pago";
       this.showToast(errorMsg, "error");
@@ -1352,7 +1352,7 @@ const app = {
       `;
       dataKey = "historialNotificaciones";
       if (statusInfo) statusInfo.textContent = "Vista Global de Administrador (Todas las notificaciones registradas en MySQL):";
-    // Si es cliente, pide misNotificaciones para traer solo sus mensajes y no ver los de otros
+      // Si es cliente, pide misNotificaciones para traer solo sus mensajes y no ver los de otros
     } else {
       query = `
         query {
@@ -2460,43 +2460,44 @@ const app = {
   // ==============================================================================
   // 6. PUENTE SOA: INTEGRACIÓN CON TIENDA ONLINE (ALAN LÓPEZ)
   // ==============================================================================
-  async cargarEstadoPuente() {
-    try {
-      const resp = await fetch("/api/tienda/estado");
-      const data = await resp.json();
-
-      const dot = document.getElementById("bridgeStatusDot");
-      const text = document.getElementById("bridgeStatusText");
-      const badge = document.getElementById("bridgeModalStatusBadge");
-      const desc = document.getElementById("bridgeModalStatusDesc");
-      const input = document.getElementById("inputNgrokUrl");
-
-      if (input && data.url) {
-        input.value = data.url;
-      }
-
-      if (data.online) {
-        if (dot) dot.className = "bridge-status-dot online";
-        if (text) text.textContent = "Tienda Online (En Vivo)";
-        if (badge) {
-          badge.className = "badge-status badge-confirmada";
-          badge.textContent = "🟢 Conectado en Vivo";
+  /* 
+    async cargarEstadoPuente() {
+      try {
+        const resp = await fetch("/api/tienda/estado");
+        const data = await resp.json();
+  
+        const dot = document.getElementById("bridgeStatusDot");
+        const text = document.getElementById("bridgeStatusText");
+        const badge = document.getElementById("bridgeModalStatusBadge");
+        const desc = document.getElementById("bridgeModalStatusDesc");
+        const input = document.getElementById("inputNgrokUrl");
+  
+        if (input && data.url) {
+          input.value = data.url;
         }
-        if (desc) desc.textContent = `Microservicio de Alan respondiendo en vivo (${data.latencia_ms} ms).`;
-      } else {
-        if (dot) dot.className = "bridge-status-dot hybrid";
-        if (text) text.textContent = "Tienda Online (Puente Resiliente)";
-        if (badge) {
-          badge.className = "badge-status badge-pendiente";
-          badge.textContent = data.estado === "BLOQUEADO_FORTINET" ? "🛡️ Firewall Escolar (Modo Resiliente)" : "🟡 Modo Respaldo SOA";
+  
+        if (data.online) {
+          if (dot) dot.className = "bridge-status-dot online";
+          if (text) text.textContent = "Tienda Online (En Vivo)";
+          if (badge) {
+            badge.className = "badge-status badge-confirmada";
+            badge.textContent = "🟢 Conectado en Vivo";
+          }
+          if (desc) desc.textContent = `Microservicio de Alan respondiendo en vivo (${data.latencia_ms} ms).`;
+        } else {
+          if (dot) dot.className = "bridge-status-dot hybrid";
+          if (text) text.textContent = "Tienda Online (Puente Resiliente)";
+          if (badge) {
+            badge.className = "badge-status badge-pendiente";
+            badge.textContent = data.estado === "BLOQUEADO_FORTINET" ? "🛡️ Firewall Escolar (Modo Resiliente)" : "🟡 Modo Respaldo SOA";
+          }
+          if (desc) desc.textContent = data.mensaje || "Túnel offline o bloqueado por la red. El puente opera con emulación conforme al contrato de Alan.";
         }
-        if (desc) desc.textContent = data.mensaje || "Túnel offline o bloqueado por la red. El puente opera con emulación conforme al contrato de Alan.";
+      } catch (e) {
+        console.warn("No se pudo consultar el estado del puente SOA:", e);
       }
-    } catch (e) {
-      console.warn("No se pudo consultar el estado del puente SOA:", e);
-    }
-  },
-
+    },
+    */
   openBridgeModal() {
     this.openModal("bridgeModal");
     this.cargarEstadoPuente();
@@ -2762,7 +2763,7 @@ const app = {
     const res = await this.graphql(query, { recursoId: recursoId });
     if (res.data?.resumenResenas) {
       const summary = res.data.resumenResenas;
-      
+
       const avgScore = document.getElementById("reviewsAverageScore");
       const totalLabel = document.getElementById("reviewsTotalLabel");
       const starsDisplay = document.getElementById("reviewsStarsDisplay");
@@ -2787,7 +2788,7 @@ const app = {
         container.innerHTML = summary.resenas.map(r => {
           const starsText = "★".repeat(r.calificacion) + "☆".repeat(5 - r.calificacion);
           const fechaStr = r.fecha ? new Date(r.fecha).toLocaleDateString("es-MX", { year: "numeric", month: "short", day: "numeric" }) : "";
-          
+
           const fotosGallery = (r.imagenes && r.imagenes.length > 0) ? `
             <div class="review-gallery" style="display: flex; gap: 8px; flex-wrap: wrap; margin-top: 10px; margin-bottom: 8px;">
               ${r.imagenes.map(imgSrc => `
@@ -2809,9 +2810,7 @@ const app = {
               <p style="margin: 0 0 6px 0; font-size: 0.85rem; color: #475569; line-height: 1.4;">${r.comentario}</p>
               ${fotosGallery}
               <div style="display: flex; justify-content: flex-start; margin-top: 4px;">
-                <span class="badge-status badge-confirmada" style="font-size: 0.7rem; padding: 2px 6px;">
-                  ✓ Verificado vía ${r.servicioExterno || "Tienda Online Alan"}
-                </span>
+              
               </div>
             </div>
           `;

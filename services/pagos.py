@@ -71,7 +71,6 @@ from event_bus import (  # type: ignore
     EVENTO_PAGO_REEMBOLSADO,
     EVENTO_RESERVACION_CANCELADA
 )
-from services.tienda_bridge import cobrar_en_tienda, reembolsar_en_tienda  # type: ignore
 
 # ==============================================================================
 # CONFIGURACIÓN DE LA PASARELA DE PAGOS ESTÁNDAR
@@ -272,39 +271,17 @@ class PagosMutations:
         fecha_pago = datetime.now().isoformat()
         folio_res = res.get("folio", res_id)
 
-        # 7. Invoca el microservicio REST externo de Alan a través del Puente SOA
+        # 7. Procesamiento en la pasarela interna del Servicio de Pagos del Hotel
         user_email = user_jwt.get("correo") or (USUARIOS_DB.get(user_id, {}).get("correo", "cliente@correo.com"))
         concepto_pago = f"Reservación Estancia {folio_res}"
         tipo_cobro = input.tipo_pago if input.tipo_pago in ["ANTICIPO", "TOTAL"] else "TOTAL"
 
-        card_details = None
-        if input.numero_tarjeta:
-            card_details = {
-                "card_number": input.numero_tarjeta,
-                "card_holder": input.titular_tarjeta or nombre_usuario or "Titular Reservación",
-                "exp_month": input.exp_mes or "12",
-                "exp_year": input.exp_ano or "28",
-                "cvv": input.cvv or "123"
-            }
+        txn_ref = f"TXN-HOTEL-{int(datetime.now().timestamp())}-{uuid.uuid4().hex[:4].upper()}"
+        order_id = f"ORD-{uuid.uuid4().hex[:6].upper()}"
+        order_number = f"HOTEL-{folio_res}"
+        receipt_number = comprobante
 
-        respuesta_tienda = cobrar_en_tienda(
-            user_id=user_id,
-            reservation_id=folio_res,
-            concept=concepto_pago,
-            amount=monto_a_cobrar,
-            payment_type=tipo_cobro,
-            payment_method=input.metodo_pago,
-            recipient_email=user_email,
-            card_details=card_details
-        )
-
-        txn_ref = respuesta_tienda.get("transaction_ref", f"TXN-CARD-{int(datetime.now().timestamp())}-4242")
-        order_id = respuesta_tienda.get("order_id", "")
-        order_number = respuesta_tienda.get("order_number", "")
-        receipt_number = respuesta_tienda.get("receipt_number", comprobante)
-        origen_servicio = respuesta_tienda.get("origen_servicio", "PUENTE_REST")
-
-        # 8. Crea el registro del pago con estado APROBADO y referencias de Alan
+        # 8. Crea el registro del pago con estado APROBADO en el sistema del Hotel
         nuevo_pago = {
             "id": pago_id,
             "reservacionId": res_id,
@@ -318,7 +295,7 @@ class PagosMutations:
             "order_id": order_id,
             "order_number": order_number,
             "receipt_number": receipt_number,
-            "servicio_externo": f"Tienda Online Alan ({origen_servicio})"
+            "servicio_externo": "Pasarela de Pagos Hotel (Interno)"
         }
 
         # 9. Guarda la transaccion de forma permanente en la tabla 'pagos' de MySQL
@@ -342,10 +319,10 @@ class PagosMutations:
             "fecha": fecha_pago
         })
 
-        # 11. Accounting del modelo Triple A: audita con la referencia externa de la tienda
+        # 11. Accounting del modelo Triple A: audita la transacción aprobada
         detalle_cobro = (
             f"Cobro aprobado por ${monto_a_cobrar:,.2f} MXN con {input.metodo_pago} "
-            f"para {folio_res}. Comprobante: {comprobante} | Ref Tienda: {txn_ref} ({origen_servicio})"
+            f"para {folio_res}. Comprobante: {comprobante} | Ref: {txn_ref}"
         )
         registrar_evento(
             usuario_id=user_id,
@@ -380,10 +357,9 @@ class PagosMutations:
         if pago["estado"] == "REEMBOLSADO":
             raise ValueError("Este pago ya ha sido reembolsado previamente.")
 
-        # Llamar al microservicio REST de reembolsos de Alan
+        # Procesar reembolso en la pasarela interna del Hotel
         txn_ref = pago.get("transaction_ref") or f"TXN-{pago['comprobante']}"
-        resp_reembolso = reembolsar_en_tienda(txn_ref, motivo or "Cancelación de estancia")
-        refund_token = resp_reembolso.get("refund_token", f"RFD-{uuid.uuid4().hex[:6]}")
+        refund_token = f"RFD-HOTEL-{uuid.uuid4().hex[:6].upper()}"
 
         pago["estado"] = "REEMBOLSADO"
         pago["refund_token"] = refund_token
@@ -435,8 +411,7 @@ def manejar_evento_reservacion_cancelada(evento_dict: dict):
         if p["reservacionId"] == res_id and p["estado"] == "APROBADO":
             p["estado"] = "REEMBOLSADO"
             txn_ref = p.get("transaction_ref") or f"TXN-{p['comprobante']}"
-            resp_reembolso = reembolsar_en_tienda(txn_ref, "Cancelación de estancia")
-            refund_token = resp_reembolso.get("refund_token", f"RFD-{uuid.uuid4().hex[:6]}")
+            refund_token = f"RFD-HOTEL-{uuid.uuid4().hex[:6].upper()}"
             p["refund_token"] = refund_token
 
             try:

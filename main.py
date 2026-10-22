@@ -63,6 +63,20 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Middleware para visualizar en tiempo real en la terminal las peticiones que haga Alan
+@app.middleware("http")
+async def log_solicitudes_externas(request: Request, call_next):
+    client_ip = request.client.host if request.client else "127.0.0.1"
+    metodo = request.method
+    ruta = request.url.path
+    
+    # Filtrar archivos estáticos para que solo se muestren peticiones de datos
+    if not any(ruta.endswith(ext) for ext in [".css", ".js", ".png", ".jpg", ".jpeg", ".ico", ".svg", ".woff2"]):
+        print(f"\n📡 [PETICIÓN ENTRANTE] {metodo} {ruta} | Desde IP: {client_ip}")
+
+    response = await call_next(request)
+    return response
+
 # Router GraphQL con Strawberry
 graphql_app = GraphQLRouter(schema, context_getter=get_context)
 app.include_router(graphql_app, prefix="/graphql")

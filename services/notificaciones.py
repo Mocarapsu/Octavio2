@@ -73,7 +73,6 @@ from event_bus import (  # type: ignore
     EVENTO_RESERVACION_CANCELADA,
     EVENTO_PAGO_REEMBOLSADO
 )
-from services.tienda_bridge import enviar_notificacion_tienda  # type: ignore
 
 
 # ==============================================================================
@@ -316,7 +315,6 @@ def consumidor_reservacion_creada(evento_dict: dict):
     """
     Consumidor del evento 'ReservacionCreada':
     Dispara email/SMS informando que la reserva está registrada y en espera de pago.
-    También notifica al microservicio REST de Alan.
     """
     datos = evento_dict.get("datos", {})
     usuario_id = datos.get("usuarioId")
@@ -330,25 +328,11 @@ def consumidor_reservacion_creada(evento_dict: dict):
     )
     despachar_notificacion(usuario_id, "EMAIL", asunto, mensaje, EVENTO_RESERVACION_CREADA)
 
-    # Notificar a la Tienda Online de Alan (RESERVATION_REMINDER)
-    u = USUARIOS_DB.get(usuario_id, {})
-    correo_dest = u.get("correo", "cliente@correo.com")
-    enviar_notificacion_tienda(
-        user_id=usuario_id,
-        recipient_email=correo_dest,
-        tipo="RESERVATION_REMINDER",
-        reservation_id=folio,
-        total=total,
-        subject=asunto,
-        message=mensaje
-    )
-
 
 def consumidor_pago_confirmado(evento_dict: dict):
     """
     Consumidor del evento 'PagoConfirmado':
     Dispara confirmación de pago y folio oficial de estancia asegurada.
-    También despacha el correo transaccional en la Tienda Online de Alan.
     """
     datos = evento_dict.get("datos", {})
     usuario_id = datos.get("usuarioId")
@@ -363,25 +347,11 @@ def consumidor_pago_confirmado(evento_dict: dict):
     )
     despachar_notificacion(usuario_id, "EMAIL", asunto, mensaje, EVENTO_PAGO_CONFIRMADO)
 
-    # Despachar al microservicio de Alan (RESERVATION_CONFIRMATION)
-    u = USUARIOS_DB.get(usuario_id, {})
-    correo_dest = u.get("correo", "cliente@correo.com")
-    enviar_notificacion_tienda(
-        user_id=usuario_id,
-        recipient_email=correo_dest,
-        tipo="RESERVATION_CONFIRMATION",
-        reservation_id=folio,
-        total=monto,
-        subject=asunto,
-        message=mensaje
-    )
-
 
 def consumidor_reservacion_cancelada(evento_dict: dict):
     """
     Consumidor del evento 'ReservacionCancelada':
-    Informa al huésped sobre la anulación de su estancia localmente
-    y a través del microservicio de Alan.
+    Informa al huésped sobre la anulación de su estancia.
     """
     datos = evento_dict.get("datos", {})
     usuario_id = datos.get("usuarioId")
@@ -394,19 +364,6 @@ def consumidor_reservacion_cancelada(evento_dict: dict):
         f"Si realizaste un pago previo, el reembolso se procesará de inmediato."
     )
     despachar_notificacion(usuario_id, "EMAIL", asunto, mensaje, EVENTO_RESERVACION_CANCELADA)
-
-    # Notificar a la Tienda Online de Alan (RESERVATION_CANCELLED)
-    u = USUARIOS_DB.get(usuario_id, {})
-    correo_dest = u.get("correo", "cliente@correo.com")
-    enviar_notificacion_tienda(
-        user_id=usuario_id,
-        recipient_email=correo_dest,
-        tipo="RESERVATION_CANCELLED",
-        reservation_id=folio,
-        total=total,
-        subject=asunto,
-        message=mensaje
-    )
 
 
 def consumidor_pago_reembolsado(evento_dict: dict):

@@ -139,10 +139,7 @@ def formatear_resena(r: dict) -> Resena:
     )
 
 
-# ==============================================================================
 # QUERIES DEL SERVICIO DE RESEÑAS
-# ==============================================================================
-
 @strawberry.type
 class ResenasQueries:
 
